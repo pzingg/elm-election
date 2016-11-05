@@ -178,7 +178,6 @@ update msg model =
 
         ToggleVote st ->
             let
-                maybeState = Dict.get st model.districts
                 newModel = { model | districts = Dict.update st toggleStateVote model.districts }
             in
                 ( updateTotals newModel
