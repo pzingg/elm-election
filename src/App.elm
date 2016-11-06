@@ -8,11 +8,9 @@ type Contest = Pres | Gov | Sen
 
 type Vote = Undecided | TooClose | Rep | Dem | Ind
 
-type alias Votes = Dict String Vote
-
-type alias Incumbent =
-    { party: Maybe Vote
-    , name: String
+type alias Votes =
+    { contest: Contest
+    , winners: Dict String Vote
     }
 
 type alias State =
@@ -48,8 +46,9 @@ type Msg
     | MouseOut
     | Load2012
     | Compare2012
-    | LoadFromQuery (Dict String String)
+    | LoadFromQuery (Maybe String) (Dict String String)
     | ToggleVote String
+    | SetContest Contest
     | Undo
     | Redo
     | Reset
@@ -88,6 +87,17 @@ voteToString v =
             "T"
         Undecided ->
             ""
+
+
+contestFromString : String -> Contest
+contestFromString s =
+    case s of
+        "Sen" ->
+            Sen
+        "Gov" ->
+            Gov
+        _ ->
+            Pres
 
 
 {-| Maine and Nebraska award two Electoral Votes to the popular vote winner,
@@ -156,8 +166,8 @@ stateInfoList =
     ]
 
 
-results2012 : List (String, Vote)
-results2012 =
+pres2012 : List (String, Vote)
+pres2012 =
     List.map
         ( \( abbr, state ) -> ( abbr, state.pres2012Party ) )
         stateInfoList
@@ -171,15 +181,17 @@ stateInfo =
 
 initialVotes : Votes
 initialVotes =
-    List.map ( \( abbr, state ) -> ( abbr, Undecided ) )
-        stateInfoList
+    let
+        winners = List.map ( \( abbr, _ ) -> ( abbr, Undecided ) )
+            stateInfoList
             |> Dict.fromList
+    in
+        { contest = Pres, winners = winners }
 
 
-votes2012 : Votes
+votes2012 : Dict String Vote
 votes2012 =
-    results2012
-        |> Dict.fromList
+    pres2012 |> Dict.fromList
 
 
 vote2012 : String -> Vote
@@ -189,7 +201,7 @@ vote2012 st =
 
 voteNow : Model -> String -> Vote
 voteNow model st =
-    getWithDefault Undecided st model.votes
+    getWithDefault Undecided st model.votes.winners
 
 
 initialModel : Model
@@ -262,7 +274,7 @@ addElectors st vote (u, t, r, d, i) =
 updateTotals : Model -> Model
 updateTotals model =
     let
-        (undecided, tooClose, rep, dem, ind) = Dict.foldl addElectors (0, 0, 0, 0, 0) model.votes
+        (undecided, tooClose, rep, dem, ind) = Dict.foldl addElectors (0, 0, 0, 0, 0) model.votes.winners
     in
         { model | undecided = undecided, tooClose = tooClose, rep = rep, dem = dem, ind = ind }
 
@@ -309,21 +321,25 @@ validState st =
 
 
 addStateToQuery : (String, Vote) -> Url -> Url
-addStateToQuery (st, v) url =
-    addQuery st (voteToString v) url
+addStateToQuery (st, vote) url =
+    addQuery st (voteToString vote) url
 
 
 makeQuery : Model -> Url -> Url
 makeQuery model url =
-    List.foldl addStateToQuery url (Dict.toList model.votes)
+    List.foldl addStateToQuery
+        (addQuery "contest" (toString model.votes.contest) url)
+        (Dict.toList model.votes.winners)
 
 
-loadFromQuery : Dict String String -> Model -> Votes
-loadFromQuery query model =
+loadFromQuery : Maybe String -> Dict String String -> Model -> Votes
+loadFromQuery maybeContest query model =
     let
         queryVotes = Dict.map (\_ v -> voteFromString v) query
     in
-        Dict.union queryVotes model.votes
+        { contest = contestFromString <| Maybe.withDefault "Pres" maybeContest
+        , winners = Dict.union queryVotes model.votes.winners
+        }
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
@@ -335,27 +351,43 @@ update msg model =
         MouseOut ->
             ( { model | hover = Nothing }, Cmd.none )
 
+        SetContest contest ->
+            if contest /= model.votes.contest
+            then
+                pushVotes model { contest = contest, winners = model.votes.winners }
+            else
+                ( model, Cmd.none )
+
         ToggleVote st ->
             let
-                newVotes = Dict.update st toggleVote model.votes
+                newWinners = Dict.update st toggleVote model.votes.winners
             in
-                pushVotes model newVotes
+                pushVotes model
+                    { contest = model.votes.contest
+                    , winners = newWinners
+                    }
 
         Load2012 ->
             let
-                newVotes = votes2012
+                newWinners = votes2012
             in
-                pushVotes model newVotes
+                pushVotes model
+                    { contest = Pres
+                    , winners = newWinners
+                    }
 
         Compare2012 ->
             let
-                newVotes = List.map (cmp2012Vote model) results2012 |> Dict.fromList
+                newWinners = List.map (cmp2012Vote model) pres2012 |> Dict.fromList
             in
-                pushVotes model newVotes
+                pushVotes model
+                    { contest = Pres
+                    , winners = newWinners
+                    }
 
-        LoadFromQuery query ->
+        LoadFromQuery maybeContest query ->
             let
-                newVotes = loadFromQuery query model
+                newVotes = loadFromQuery maybeContest query model
             in
                 pushVotes model newVotes
 

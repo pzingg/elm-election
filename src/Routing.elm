@@ -20,10 +20,11 @@ location2messages : Location -> List Msg
 location2messages location =
     let
         url = Erl.parse location.href
-        filteredQuery = Dict.filter (\k v -> validState k) url.query
+        query = url.query
+        filteredQuery = Dict.filter (\k v -> validState k) query
     in
         if Dict.isEmpty filteredQuery
         then
             []
         else
-            [ LoadFromQuery filteredQuery ]
+            [ LoadFromQuery (Dict.get "contest" query) filteredQuery ]

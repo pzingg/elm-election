@@ -19,7 +19,7 @@ import Svg.Attributes exposing
     )
 import Svg.Events exposing (..)
 
-import App exposing (Model, Msg(..), Vote(..), vote2012)
+import App exposing (Model, Msg(..), Vote(..), Contest(..), vote2012)
 
 
 stateText : Model -> String
@@ -45,21 +45,96 @@ stateText model =
 
 voteText : Model -> Vote -> String
 voteText model vote =
-    case vote of
-        Undecided ->
-            "Undecided: " ++ (toString model.undecided)
+    let
+        (rep, dem) =
+            case model.votes.contest of
+                Pres ->
+                    ( "Trump", "Clinton" )
+                _ ->
+                    ( "Republicans", "Democrats" )
+    in
+        case vote of
+            Undecided ->
+                "Undecided: " ++ (toString model.undecided)
 
-        TooClose ->
-            "Too close to call: " ++ (toString model.tooClose)
+            TooClose ->
+                "Too close to call: " ++ (toString model.tooClose)
 
-        Rep ->
-            "Trump: " ++ (toString model.rep)
+            Rep ->
+                rep ++ ": " ++ (toString model.rep)
 
-        Dem ->
-            "Clinton: " ++ (toString model.dem)
+            Dem ->
+                dem ++ ": " ++ (toString model.dem)
 
-        Ind ->
-            "Independents: " ++ (toString model.dem)
+            Ind ->
+                "Independents: " ++ (toString model.dem)
+
+
+viewCounts : Model -> List (Html Msg)
+viewCounts model =
+    let
+        contest =
+            case model.votes.contest of
+                Sen ->
+                    "Senate"
+                Gov ->
+                    "Governors"
+                Pres ->
+                    "President"
+        repdem =
+            [ p []
+                [ Html.text contest ]
+            , p []
+                [ Html.text (voteText model Rep) ]
+            , p []
+                [ Html.text (voteText model Dem) ]
+            ]
+        ind =
+            case model.votes.contest of
+                Pres ->
+                    []
+                _ ->
+                    [ p []
+                        [ Html.text (voteText model Ind) ]
+                    ]
+        others =
+            [ p []
+                [ Html.text (voteText model TooClose) ]
+            , p []
+                [ Html.text (voteText model Undecided) ]
+            ]
+    in
+        repdem ++ ind ++ others
+
+viewButtons : Model -> List (Html Msg)
+viewButtons model =
+    let
+        contestButtons =
+            case model.votes.contest of
+                Pres ->
+                    [ button [ onClick Load2012 ]
+                        [ Html.text "Load 2012" ]
+                    , button [ onClick Compare2012 ]
+                        [ Html.text "Compare 2012" ]
+                    ]
+                _ ->
+                    []
+        stdButtons =
+            [ button [ disabled (cantUndo model), onClick Undo ]
+                [ Html.text "Undo" ]
+            , button [ disabled (cantRedo model), onClick Redo ]
+                [ Html.text "Redo" ]
+            , button [ onClick Reset ]
+                [ Html.text "Reset" ]
+            , button [ onClick <| SetContest Pres ]
+                [ Html.text "President" ]
+            , button [ onClick <| SetContest Sen ]
+                [ Html.text "Senate" ]
+            , button [ onClick <| SetContest Gov ]
+                [ Html.text "Governors" ]
+            ]
+    in
+        contestButtons ++ stdButtons
 
 
 congressionalDistrict : String -> Bool
@@ -80,7 +155,7 @@ cantRedo model =
 voteColor : Model -> String -> String
 voteColor model st =
     let
-        maybeVote = Dict.get st model.votes
+        maybeVote = Dict.get st model.votes.winners
     in
         case maybeVote of
             Just vote ->
@@ -246,26 +321,9 @@ view model =
                     ]
                 ]
             , td [ id "legend" ]
+                ( (viewCounts model) ++ (viewButtons model) ++
                 [ p []
-                    [ Html.text (voteText model Rep) ]
-                , p []
-                    [ Html.text (voteText model Dem) ]
-                , p []
-                    [ Html.text (voteText model TooClose) ]
-                , p []
-                    [ Html.text (voteText model Undecided) ]
-                , button [ onClick Load2012 ]
-                    [ Html.text "Load 2012" ]
-                , button [ onClick Compare2012 ]
-                    [ Html.text "Compare 2012" ]
-                , button [ disabled (cantUndo model), onClick Undo ]
-                    [ Html.text "Undo" ]
-                , button [ disabled (cantRedo model), onClick Redo ]
-                    [ Html.text "Redo" ]
-                , button [ onClick Reset ]
-                    [ Html.text "Reset" ]
-                , p []
                     [ Html.text (stateText model) ]
-                ]
+                ] )
             ]
         ]
