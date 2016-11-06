@@ -1,100 +1,219 @@
 module App exposing (..)
 
 import Dict exposing (Dict)
+import Task exposing (Task)
+
 
 type Vote = Undecided | Rep | Dem
 
+type alias Votes = Dict String Vote
+
 type alias State =
-    { name: String
-    , delegates: Int
-    , vote: Vote
-    , locked: Bool
+    { abbr: String
+    , name: String
+    , electors: Int
     }
 
 type alias Model =
-    { districts: Dict String State
+    { votes: Votes
+    , history: List Votes
+    , future: List Votes
     , hover: Maybe State
     , undecided: Int
     , rep: Int
     , dem: Int
     }
 
+type Msg
+    = Hover String
+    | MouseOut
+    | Load2012
+    | Compare2012
+    | ToggleVote String
+    | Undo
+    | Redo
+    | Reset
+
+
+getWithDefault : a -> comparable -> Dict comparable a -> a
+getWithDefault def key =
+    Maybe.withDefault def << Dict.get key
+
+
+voteToString : Vote -> String
+voteToString v =
+    case v of
+        Rep ->
+            "R"
+        Dem ->
+            "D"
+        _ ->
+            ""
+
+
+voteFromString : String -> Vote
+voteFromString s =
+    case s of
+        "R" ->
+            Rep
+        "D" ->
+            Dem
+        _ ->
+            Undecided
+
 
 {-| Maine and Nebraska award two Electoral Votes to the popular vote winner,
     and then one each to the popular vote winner in each Congressional district
     (2 in Maine, 3 in Nebraska) in their state.
 -}
-stateInfo : List (String, String, Int)
-stateInfo =
-    [
-        ( "AL", "Alabama", 9 ),
-        ( "AK", "Alaska", 3 ),
-        ( "AZ", "Arizona", 11 ),
-        ( "AR", "Arkansas", 6 ),
-        ( "CA", "California", 55 ),
-        ( "CO", "Colorado", 9 ),
-        ( "CT", "Connecticut", 7 ),
-        ( "DE", "Delaware", 3 ),
-        ( "DC", "District of Columbia", 3 ),
-        ( "FL", "Florida", 29 ),
-        ( "GA", "Georgia", 16 ),
-        ( "HI", "Hawaii", 4 ),
-        ( "ID", "Idaho", 4 ),
-        ( "IL", "Illinois", 20 ),
-        ( "IN", "Indiana", 11 ),
-        ( "IA", "Iowa", 6 ),
-        ( "KS", "Kansas", 6 ),
-        ( "KY", "Kentucky", 8 ),
-        ( "LA", "Louisiana", 8 ),
-        ( "ME", "Maine", 2 ),
-        ( "ME1", "Maine-1", 1 ),
-        ( "ME2", "Maine-2", 1 ),
-        ( "MD", "Maryland", 10 ),
-        ( "MA", "Massachusetts", 11 ),
-        ( "MI", "Michigan", 16 ),
-        ( "MN", "Minnesota", 10 ),
-        ( "MS", "Mississippi", 6 ),
-        ( "MO", "Missouri", 10 ),
-        ( "MT", "Montana", 3 ),
-        ( "NE", "Nebraska", 2 ),
-        ( "NE1", "Nebraska-1", 1 ),
-        ( "NE2", "Nebraska-2", 1 ),
-        ( "NE3", "Nebraska-3", 1 ),
-        ( "NV", "Nevada", 6 ),
-        ( "NH", "New Hampshire", 4 ),
-        ( "NJ", "New Jersey", 14 ),
-        ( "NM", "New Mexico", 5 ),
-        ( "NY", "New York", 29 ),
-        ( "NC", "North Carolina", 15 ),
-        ( "ND", "North Dakota", 3 ),
-        ( "OH", "Ohio", 18 ),
-        ( "OK", "Oklahoma", 7 ),
-        ( "OR", "Oregon", 7 ),
-        ( "PA", "Pennsylvania", 20 ),
-        ( "RI", "Rhode Island", 4 ),
-        ( "SC", "South Carolina", 9 ),
-        ( "SD", "South Dakota", 3 ),
-        ( "TN", "Tennessee", 11 ),
-        ( "TX", "Texas", 38 ),
-        ( "UT", "Utah", 6 ),
-        ( "VT", "Vermont", 3 ),
-        ( "VA", "Virginia", 13 ),
-        ( "WA", "Washington", 12 ),
-        ( "WV", "West Virgina", 5 ),
-        ( "WI", "Wisconsin", 10 ),
-        ( "WY", "Wyoming", 3 )
+stateInfoList : List (String, String, Int)
+stateInfoList =
+    [ ( "AL", "Alabama", 9 )
+    , ( "AK", "Alaska", 3 )
+    , ( "AZ", "Arizona", 11 )
+    , ( "AR", "Arkansas", 6 )
+    , ( "CA", "California", 55 )
+    , ( "CO", "Colorado", 9 )
+    , ( "CT", "Connecticut", 7 )
+    , ( "DE", "Delaware", 3 )
+    , ( "DC", "District of Columbia", 3 )
+    , ( "FL", "Florida", 29 )
+    , ( "GA", "Georgia", 16 )
+    , ( "HI", "Hawaii", 4 )
+    , ( "ID", "Idaho", 4 )
+    , ( "IL", "Illinois", 20 )
+    , ( "IN", "Indiana", 11 )
+    , ( "IA", "Iowa", 6 )
+    , ( "KS", "Kansas", 6 )
+    , ( "KY", "Kentucky", 8 )
+    , ( "LA", "Louisiana", 8 )
+    , ( "ME", "Maine Sen", 2 )
+    , ( "ME-1", "Maine CD1", 1 )
+    , ( "ME-2", "Maine CD2", 1 )
+    , ( "MD", "Maryland", 10 )
+    , ( "MA", "Massachusetts", 11 )
+    , ( "MI", "Michigan", 16 )
+    , ( "MN", "Minnesota", 10 )
+    , ( "MS", "Mississippi", 6 )
+    , ( "MO", "Missouri", 10 )
+    , ( "MT", "Montana", 3 )
+    , ( "NE", "Nebraska Sen", 2 )
+    , ( "NE-1", "Nebraska CD1", 1 )
+    , ( "NE-2", "Nebraska CD2", 1 )
+    , ( "NE-3", "Nebraska CD3", 1 )
+    , ( "NV", "Nevada", 6 )
+    , ( "NH", "New Hampshire", 4 )
+    , ( "NJ", "New Jersey", 14 )
+    , ( "NM", "New Mexico", 5 )
+    , ( "NY", "New York", 29 )
+    , ( "NC", "North Carolina", 15 )
+    , ( "ND", "North Dakota", 3 )
+    , ( "OH", "Ohio", 18 )
+    , ( "OK", "Oklahoma", 7 )
+    , ( "OR", "Oregon", 7 )
+    , ( "PA", "Pennsylvania", 20 )
+    , ( "RI", "Rhode Island", 4 )
+    , ( "SC", "South Carolina", 9 )
+    , ( "SD", "South Dakota", 3 )
+    , ( "TN", "Tennessee", 11 )
+    , ( "TX", "Texas", 38 )
+    , ( "UT", "Utah", 6 )
+    , ( "VT", "Vermont", 3 )
+    , ( "VA", "Virginia", 13 )
+    , ( "WA", "Washington", 12 )
+    , ( "WV", "West Virgina", 5 )
+    , ( "WI", "Wisconsin", 10 )
+    , ( "WY", "Wyoming", 3 )
     ]
 
-stateFromInfo : (String, String, Int) -> (String, State)
-stateFromInfo (abbrev, name, delegates) =
-    ( abbrev
-    , { name = name, delegates = delegates, vote = Undecided, locked = False }
-    )
+
+stateInfo : Dict String State
+stateInfo =
+    List.map (\(st, name, electors) -> ( st, { abbr = st, name = name, electors = electors } ))
+        stateInfoList
+        |> Dict.fromList
+
+
+results2012 : List (String, Vote)
+results2012 =
+    [ ( "AL", Rep )
+    , ( "AK", Rep )
+    , ( "AZ", Rep )
+    , ( "AR", Rep )
+    , ( "CA", Dem )
+    , ( "CO", Dem )
+    , ( "CT", Dem )
+    , ( "DE", Dem )
+    , ( "DC", Dem )
+    , ( "FL", Dem )
+    , ( "GA", Rep )
+    , ( "HI", Dem )
+    , ( "ID", Rep )
+    , ( "IL", Dem )
+    , ( "IN", Rep )
+    , ( "IA", Dem )
+    , ( "KS", Rep )
+    , ( "KY", Rep )
+    , ( "LA", Rep )
+    , ( "ME", Dem )
+    , ( "ME-1", Dem )
+    , ( "ME-2", Dem )
+    , ( "MD", Dem )
+    , ( "MA", Dem )
+    , ( "MI", Dem )
+    , ( "MN", Dem )
+    , ( "MS", Rep )
+    , ( "MO", Rep )
+    , ( "MT", Rep )
+    , ( "NE", Rep )
+    , ( "NE-1", Rep )
+    , ( "NE-2", Rep )
+    , ( "NE-3", Rep )
+    , ( "NV", Dem )
+    , ( "NH", Dem )
+    , ( "NJ", Dem )
+    , ( "NM", Dem )
+    , ( "NY", Dem )
+    , ( "NC", Rep )
+    , ( "ND", Rep )
+    , ( "OH", Dem )
+    , ( "OK", Rep )
+    , ( "OR", Dem )
+    , ( "PA", Dem )
+    , ( "RI", Dem )
+    , ( "SC", Rep )
+    , ( "SD", Rep )
+    , ( "TN", Rep )
+    , ( "TX", Rep )
+    , ( "UT", Rep )
+    , ( "VT", Dem )
+    , ( "VA", Dem )
+    , ( "WA", Dem )
+    , ( "WV", Rep )
+    , ( "WI", Dem )
+    , ( "WY", Rep )
+    ]
+
+
+initialVotes : Votes
+initialVotes = List.map ( \(st, vote) -> (st, Undecided) ) results2012 |> Dict.fromList
+
+
+votes2012 : Votes
+votes2012 =
+    Dict.fromList results2012
+
+
+vote2012 : String -> Vote
+vote2012 st =
+    getWithDefault Undecided st votes2012
 
 
 initialModel : Model
 initialModel =
-    { districts = List.map stateFromInfo stateInfo |> Dict.fromList
+    { votes = initialVotes
+    , history = []
+    , future = []
     , hover = Nothing
     , undecided = 538
     , rep = 0
@@ -102,98 +221,158 @@ initialModel =
     }
 
 
-type Msg
-    = Hover String
-    | MouseOut
-    | ToggleVote String
-    | ToggleLock String
-    | Reset
-
-
 init : (Model, Cmd Msg)
 init =
     ( initialModel, Cmd.none )
 
 
-toggleStateVote : Maybe State -> Maybe State
-toggleStateVote maybeState =
-    case maybeState of
-        Just state ->
-            case state.vote of
+toggleVote : Maybe Vote -> Maybe Vote
+toggleVote maybeVote =
+    case maybeVote of
+        Just vote ->
+            case vote of
                 Undecided ->
-                    Just { state | vote = Rep }
+                    Just Rep
                 Rep ->
-                    Just { state | vote = Dem }
+                    Just Dem
                 Dem ->
-                    Just { state | vote = Undecided }
-        Nothing ->
-            Nothing
-
-
-toggleStateLocked : Maybe State -> Maybe State
-toggleStateLocked maybeState =
-    case maybeState of
-        Just state ->
-            Just { state | locked = not state.locked }
+                    Just Undecided
 
         Nothing ->
             Nothing
 
 
-getDelegates : Vote -> State -> Int
-getDelegates vote state =
-    if state.vote == vote
-    then
-        state.delegates
-    else
-        0
-
-
-addDelegates : Vote -> String -> State -> Int -> Int
-addDelegates vote _ state accum =
+addElectors : String -> Vote -> (Int, Int, Int) -> (Int, Int, Int)
+addElectors st vote (u, r, d) =
     let
-        d = getDelegates vote state
+        maybeState = Dict.get st stateInfo
+        count = case maybeState of
+            Just state ->
+                state.electors
+
+            Nothing ->
+                0
     in
-        accum + d
+        case vote of
+            Undecided ->
+                (u + count, r, d)
+
+            Rep ->
+                (u, r + count, d)
+
+            Dem ->
+                (u, r, d + count)
 
 
 updateTotals : Model -> Model
 updateTotals model =
     let
-        undecided = Dict.foldl (addDelegates Undecided) 0 model.districts
-        rep = Dict.foldl (addDelegates Rep) 0 model.districts
-        dem = Dict.foldl (addDelegates Dem) 0 model.districts
+        (undecided, rep, dem) = Dict.foldl addElectors (0, 0, 0) model.votes
     in
         { model | undecided = undecided, rep = rep, dem = dem }
+
+
+cmp2012Vote : Votes -> (String, Vote) -> (String, Vote)
+cmp2012Vote votes (st, vote2012) =
+    let
+        voteNow = getWithDefault Undecided st votes
+        change = case (vote2012, voteNow) of
+            ( Rep, Rep ) ->
+                Undecided
+
+            ( Dem, Dem ) ->
+                Undecided
+
+            ( Rep, Dem ) ->
+                Dem
+
+            ( Dem, Rep ) ->
+                Rep
+
+            _ ->
+                Undecided
+    in
+        (st, change)
+
+
+pushVotes : Model -> Votes -> (Model, Cmd Msg)
+pushVotes model newVotes =
+    let
+        newHistory = model.votes :: model.history
+        newModel = updateTotals
+            { model
+            | votes = newVotes
+            , history = newHistory
+            , future = []
+            }
+    in
+        ( newModel, Cmd.none )
 
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
     case msg of
         Hover st ->
-            ( { model | hover = Dict.get st model.districts }, Cmd.none )
+            ( { model | hover = Dict.get st stateInfo }, Cmd.none )
 
         MouseOut ->
             ( { model | hover = Nothing }, Cmd.none )
 
         ToggleVote st ->
             let
-                newModel = { model | districts = Dict.update st toggleStateVote model.districts }
+                newVotes = Dict.update st toggleVote model.votes
             in
-                ( updateTotals newModel
-                , Cmd.none
-                )
+                pushVotes model newVotes
 
-        ToggleLock st ->
+        Load2012 ->
             let
-                maybeState = Dict.get st model.districts
+                newVotes = votes2012
             in
-                ( { model | districts = Dict.update st toggleStateLocked model.districts }
-                , Cmd.none
-                )
+                pushVotes model newVotes
+
+        Compare2012 ->
+            let
+                newVotes = List.map (cmp2012Vote model.votes) results2012 |> Dict.fromList
+            in
+                pushVotes model newVotes
 
         Reset ->
-            ( initialModel, Cmd.none )
+            let
+                newVotes = initialVotes
+            in
+                pushVotes model newVotes
+
+        Undo ->
+            let
+                newModel =
+                    case model.history of
+                        [] ->
+                            model
+                        votes :: xs ->
+                            updateTotals
+                                { model
+                                | future = model.votes :: model.future
+                                , votes = votes
+                                , history = xs
+                                }
+            in
+                ( newModel, Cmd.none )
+
+        Redo ->
+            let
+                newModel =
+                    case model.future of
+                        [] ->
+                            model
+                        votes :: xs ->
+                            updateTotals
+                                { model
+                                | history = model.votes :: model.history
+                                , votes = votes
+                                , future = xs
+                                }
+            in
+                ( newModel, Cmd.none )
 
 
 subscriptions : Model -> Sub Msg
