@@ -58,6 +58,9 @@ voteText model vote =
         Dem ->
             "Clinton: " ++ (toString model.dem)
 
+        Ind ->
+            "Independents: " ++ (toString model.dem)
+
 
 congressionalDistrict : String -> Bool
 congressionalDistrict st =
@@ -97,6 +100,9 @@ voteColor model st =
 
                     Rep ->
                         "#ff0000"
+
+                    Ind ->
+                        "#00ff00"
 
             Nothing ->
                 "#333333"
