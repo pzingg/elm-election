@@ -2,7 +2,7 @@ module App exposing (..)
 
 import Dict exposing (Dict)
 import Task exposing (Task)
-
+import Erl exposing (Url, addQuery)
 
 type Vote = Undecided | TooClose | Rep | Dem
 
@@ -30,6 +30,7 @@ type Msg
     | MouseOut
     | Load2012
     | Compare2012
+    | LoadFromQuery (Dict String String)
     | ToggleVote String
     | Undo
     | Redo
@@ -52,6 +53,19 @@ voteFromString s =
             TooClose
         _ ->
             Undecided
+
+
+voteToString : Vote -> String
+voteToString v =
+    case v of
+        Rep ->
+            "R"
+        Dem ->
+            "D"
+        TooClose ->
+            "T"
+        Undecided ->
+            ""
 
 
 {-| Maine and Nebraska award two Electoral Votes to the popular vote winner,
@@ -201,6 +215,11 @@ vote2012 st =
     getWithDefault Undecided st votes2012
 
 
+voteNow : Model -> String -> Vote
+voteNow model st =
+    getWithDefault Undecided st model.votes
+
+
 initialModel : Model
 initialModel =
     { votes = initialVotes
@@ -270,11 +289,10 @@ updateTotals model =
         { model | undecided = undecided, tooClose = tooClose, rep = rep, dem = dem }
 
 
-cmp2012Vote : Votes -> (String, Vote) -> (String, Vote)
-cmp2012Vote votes (st, vote2012) =
+cmp2012Vote : Model -> (String, Vote) -> (String, Vote)
+cmp2012Vote model (st, vote2012) =
     let
-        voteNow = getWithDefault Undecided st votes
-        change = case (vote2012, voteNow) of
+        change = case (vote2012, (voteNow model st)) of
             ( Rep, Rep ) ->
                 Undecided
 
@@ -307,6 +325,29 @@ pushVotes model newVotes =
         ( newModel, Cmd.none )
 
 
+validState : String -> Bool
+validState st =
+    Dict.member st votes2012
+
+
+addStateToQuery : (String, Vote) -> Url -> Url
+addStateToQuery (st, v) url =
+    addQuery st (voteToString v) url
+
+
+makeQuery : Model -> Url -> Url
+makeQuery model url =
+    List.foldl addStateToQuery url (Dict.toList model.votes)
+
+
+loadFromQuery : Dict String String -> Model -> Votes
+loadFromQuery query model =
+    let
+        queryVotes = Dict.map (\_ v -> voteFromString v) query
+    in
+        Dict.union queryVotes model.votes
+
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
     case msg of
@@ -330,7 +371,13 @@ update msg model =
 
         Compare2012 ->
             let
-                newVotes = List.map (cmp2012Vote model.votes) results2012 |> Dict.fromList
+                newVotes = List.map (cmp2012Vote model) results2012 |> Dict.fromList
+            in
+                pushVotes model newVotes
+
+        LoadFromQuery query ->
+            let
+                newVotes = loadFromQuery query model
             in
                 pushVotes model newVotes
 
