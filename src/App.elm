@@ -4,7 +4,7 @@ import Dict exposing (Dict)
 import Task exposing (Task)
 
 
-type Vote = Undecided | Rep | Dem
+type Vote = Undecided | TooClose | Rep | Dem
 
 type alias Votes = Dict String Vote
 
@@ -20,6 +20,7 @@ type alias Model =
     , future: List Votes
     , hover: Maybe State
     , undecided: Int
+    , tooClose: Int
     , rep: Int
     , dem: Int
     }
@@ -40,17 +41,6 @@ getWithDefault def key =
     Maybe.withDefault def << Dict.get key
 
 
-voteToString : Vote -> String
-voteToString v =
-    case v of
-        Rep ->
-            "R"
-        Dem ->
-            "D"
-        _ ->
-            ""
-
-
 voteFromString : String -> Vote
 voteFromString s =
     case s of
@@ -58,6 +48,8 @@ voteFromString s =
             Rep
         "D" ->
             Dem
+        "T" ->
+            TooClose
         _ ->
             Undecided
 
@@ -216,6 +208,7 @@ initialModel =
     , future = []
     , hover = Nothing
     , undecided = 538
+    , tooClose = 0
     , rep = 0
     , dem = 0
     }
@@ -232,6 +225,8 @@ toggleVote maybeVote =
         Just vote ->
             case vote of
                 Undecided ->
+                    Just TooClose
+                TooClose ->
                     Just Rep
                 Rep ->
                     Just Dem
@@ -242,8 +237,8 @@ toggleVote maybeVote =
             Nothing
 
 
-addElectors : String -> Vote -> (Int, Int, Int) -> (Int, Int, Int)
-addElectors st vote (u, r, d) =
+addElectors : String -> Vote -> (Int, Int, Int, Int) -> (Int, Int, Int, Int)
+addElectors st vote (u, t, r, d) =
     let
         maybeState = Dict.get st stateInfo
         count = case maybeState of
@@ -254,22 +249,25 @@ addElectors st vote (u, r, d) =
                 0
     in
         case vote of
-            Undecided ->
-                (u + count, r, d)
-
             Rep ->
-                (u, r + count, d)
+                (u, t, r + count, d)
 
             Dem ->
-                (u, r, d + count)
+                (u, t, r, d + count)
+
+            Undecided ->
+                (u + count, t, r, d)
+
+            TooClose ->
+                (u, t + count, r, d)
 
 
 updateTotals : Model -> Model
 updateTotals model =
     let
-        (undecided, rep, dem) = Dict.foldl addElectors (0, 0, 0) model.votes
+        (undecided, tooClose, rep, dem) = Dict.foldl addElectors (0, 0, 0, 0) model.votes
     in
-        { model | undecided = undecided, rep = rep, dem = dem }
+        { model | undecided = undecided, tooClose = tooClose, rep = rep, dem = dem }
 
 
 cmp2012Vote : Votes -> (String, Vote) -> (String, Vote)

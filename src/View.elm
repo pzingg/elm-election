@@ -49,6 +49,9 @@ voteText model vote =
         Undecided ->
             "Undecided: " ++ (toString model.undecided)
 
+        TooClose ->
+            "Too close to call: " ++ (toString model.tooClose)
+
         Rep ->
             "Trump: " ++ (toString model.rep)
 
@@ -85,6 +88,9 @@ voteColor model st =
                             "#ffffaa"
                         else
                             "#cccccc"
+
+                    TooClose ->
+                        "#9975b9"
 
                     Dem ->
                         "#0000ff"
@@ -238,6 +244,8 @@ view model =
                     [ Html.text (voteText model Rep) ]
                 , p []
                     [ Html.text (voteText model Dem) ]
+                , p []
+                    [ Html.text (voteText model TooClose) ]
                 , p []
                     [ Html.text (voteText model Undecided) ]
                 , button [ onClick Load2012 ]
