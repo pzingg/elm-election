@@ -1,31 +1,42 @@
 module App exposing (..)
 
 import Dict exposing (Dict)
-import Task exposing (Task)
+import String
+
 import Erl exposing (Url, addQuery)
 
 type Contest = Pres | Gov | Sen
 
-type Vote = Undecided | TooClose | Rep | Dem | Ind
+type Party = Undecided | TooClose | Rep | Dem | Ind
+
+{- Up seats can be changed.
+-}
+type Seat = Up | NotUp | NotAVote
+
+type alias Vote = (Party, Seat)
+
+{- Senate contest has two votes per state.
+-}
+type alias StateVote = (Vote, Vote)
 
 type alias Votes =
     { contest: Contest
-    , winners: Dict String Vote
+    , winners: Dict String StateVote
     }
 
 type alias State =
     { abbr: String
     , name: String
     , electors: Int
-    , pres2012Party: Vote
+    , pres2012Party: Party
     , govElection: Bool
-    , govParty: Maybe Vote
+    , govParty: Maybe Party
     , govName: String
-    , sen3Party: Maybe Vote
+    , sen3Party: Maybe Party
     , sen3Name: String
-    , sen1Party: Maybe Vote
+    , sen1Party: Maybe Party
     , sen1Name: String
-    , sen2Party: Maybe Vote
+    , sen2Party: Maybe Party
     , sen2Name: String
     }
 
@@ -41,11 +52,14 @@ type alias Model =
     , ind: Int
     }
 
+
 type Msg
     = Hover String
     | MouseOut
     | Load2012
     | Compare2012
+    | LoadSenIncumbents
+    | LoadGovIncumbents
     | LoadFromQuery (Maybe String) (Dict String String)
     | ToggleVote String
     | SetContest Contest
@@ -59,24 +73,30 @@ getWithDefault def key =
     Maybe.withDefault def << Dict.get key
 
 
-voteFromString : String -> Vote
-voteFromString s =
+noVote : Vote
+noVote = (Undecided, NotAVote)
+
+
+partyFromString : Maybe String -> Maybe Party
+partyFromString s =
     case s of
-        "R" ->
-            Rep
-        "D" ->
-            Dem
-        "I" ->
-            Ind
-        "T" ->
-            TooClose
+        Just "R" ->
+            Just Rep
+        Just "D" ->
+            Just Dem
+        Just "I" ->
+            Just Ind
+        Just "T" ->
+            Just TooClose
+        Just "-" ->
+            Just Undecided
         _ ->
-            Undecided
+            Nothing
 
 
-voteToString : Vote -> String
-voteToString v =
-    case v of
+partyToString : Party -> String
+partyToString party =
+    case party of
         Rep ->
             "R"
         Dem ->
@@ -104,7 +124,6 @@ contestFromString s =
     and then one each to the popular vote winner in each Congressional district
     (2 in Maine, 3 in Nebraska) in their state.
 -}
-
 stateInfoList : List (String, State)
 stateInfoList =
     [ ( "AL", { abbr = "AL", name = "Alabama", electors = 9, pres2012Party = Rep, govElection = False, govParty = Just Rep, govName = "Robert J Bentley", sen3Party = Just Rep, sen3Name = "Richard Shelby", sen1Party = Nothing, sen1Name = "", sen2Party = Just Rep, sen2Name = "Jeff Sessions" } )
@@ -166,10 +185,10 @@ stateInfoList =
     ]
 
 
-pres2012 : List (String, Vote)
+pres2012 : List (String, StateVote)
 pres2012 =
     List.map
-        ( \( abbr, state ) -> ( abbr, state.pres2012Party ) )
+        ( \( abbr, state ) -> ( abbr, ( (state.pres2012Party, Up), noVote ) ) )
         stateInfoList
 
 
@@ -179,34 +198,119 @@ stateInfo =
         |> Dict.fromList
 
 
-initialVotes : Votes
-initialVotes =
-    let
-        winners = List.map ( \( abbr, _ ) -> ( abbr, Undecided ) )
-            stateInfoList
-            |> Dict.fromList
-    in
-        { contest = Pres, winners = winners }
+allUndecided : Dict String StateVote
+allUndecided =
+    List.map ( \( st, _ ) -> ( st, ( (Undecided, Up), noVote ) ) )
+        stateInfoList
+        |> Dict.fromList
 
 
-votes2012 : Dict String Vote
+votes2012 : Dict String StateVote
 votes2012 =
     pres2012 |> Dict.fromList
 
 
-vote2012 : String -> Vote
+vote2012 : String -> Party
 vote2012 st =
-    getWithDefault Undecided st votes2012
+    let
+        (vote1, _) = getWithDefault (noVote, noVote) st votes2012
+    in
+        fst vote1
 
 
-voteNow : Model -> String -> Vote
-voteNow model st =
-    getWithDefault Undecided st model.votes.winners
+initialGovForState : Bool -> State -> StateVote
+initialGovForState incumbents state =
+    if state.govElection then
+        case state.govParty of
+            Just party ->
+                if incumbents
+                then
+                    ( (party, Up), noVote )
+                else
+                    ( (Undecided, Up), noVote )
+            Nothing ->
+                ( (Undecided, Up), noVote )
+    else
+        case state.govParty of
+            Just party ->
+                ( (party, NotUp), noVote )
+            Nothing ->
+                ( noVote, noVote )
+
+
+initialGovernors : Bool -> Dict String StateVote
+initialGovernors incumbents =
+    List.map ( \( st, state ) -> ( st, initialGovForState incumbents state ) )
+        stateInfoList
+        |> Dict.fromList
+
+
+initialSenForState : Bool -> State -> StateVote
+initialSenForState incumbents state =
+    let
+        sen3 =
+            case state.sen3Party of
+                Just party ->
+                    if incumbents
+                    then
+                        (party, Up)
+                    else
+                        (Undecided, Up)
+                Nothing ->
+                    noVote
+        sen1 =
+            case state.sen1Party of
+                Just party ->
+                    (party, NotUp)
+                Nothing ->
+                    noVote
+        sen2 =
+            case state.sen2Party of
+                Just party ->
+                    (party, NotUp)
+                Nothing ->
+                    noVote
+    in
+        if sen3 /= noVote
+        then
+            if sen1 /= noVote
+            then
+                (sen3, sen1)
+            else
+                (sen3, sen2)
+        else
+            (sen1, sen2)
+
+
+initialSenators : Bool -> Dict String StateVote
+initialSenators incumbents =
+    List.map ( \( st, state ) -> ( st, initialSenForState incumbents state ) )
+        stateInfoList
+        |> Dict.fromList
+
+
+initialVotes : Contest -> Bool -> Dict String StateVote
+initialVotes contest incumbents =
+    case contest of
+        Pres ->
+            if incumbents
+            then
+                votes2012
+            else
+                allUndecided
+        Sen ->
+            initialSenators incumbents
+        Gov ->
+            initialGovernors incumbents
+
+
+getStateVote : Model -> String -> StateVote
+getStateVote model st = getWithDefault (noVote, noVote) st model.votes.winners
 
 
 initialModel : Model
 initialModel =
-    { votes = initialVotes
+    { votes = { contest = Pres, winners = allUndecided }
     , history = []
     , future = []
     , hover = Nothing
@@ -223,82 +327,151 @@ init =
     ( initialModel, Cmd.none )
 
 
-toggleVote : Maybe Vote -> Maybe Vote
-toggleVote maybeVote =
-    case maybeVote of
-        Just vote ->
+toggleVote : Model -> Maybe StateVote -> Maybe StateVote
+toggleVote model maybeVotes =
+    case maybeVotes of
+        Just (vote, other) ->
             case vote of
-                Undecided ->
-                    Just TooClose
-                TooClose ->
-                    Just Rep
-                Rep ->
-                    Just Dem
-                Dem ->
-                    Just Undecided
-                Ind ->
-                    Just Undecided
-
+                (Undecided, Up) ->
+                    Just ( (TooClose, Up), other )
+                (TooClose, Up) ->
+                    Just ( (Rep, Up), other )
+                (Rep, Up) ->
+                    Just ( (Dem, Up), other )
+                (Dem, Up) ->
+                    case model.votes.contest of
+                        Pres ->
+                            Just ( (Undecided, Up), other )
+                        _ ->
+                            Just ( (Ind, Up), other )
+                (Ind, Up) ->
+                    Just ( (Undecided, Up), other )
+                _ ->
+                    maybeVotes
         Nothing ->
             Nothing
 
 
-addElectors : String -> Vote -> (Int, Int, Int, Int, Int) -> (Int, Int, Int, Int, Int)
-addElectors st vote (u, t, r, d, i) =
+congressionalDistrict : String -> Bool
+congressionalDistrict st =
+    String.contains "-" st
+
+
+hasGovernorElection : String -> Bool
+hasGovernorElection st =
+    getWithDefault False st <| Dict.map (\k v -> v.govElection) stateInfo
+
+
+hasSenateElection : String -> Bool
+hasSenateElection st =
+    getWithDefault False st <| Dict.map (\k v -> (v.sen3Party /= Nothing)) stateInfo
+
+
+electorsForState : String -> Int
+electorsForState st =
     let
         maybeState = Dict.get st stateInfo
-        count = case maybeState of
+    in
+        case maybeState of
             Just state ->
                 state.electors
-
             Nothing ->
                 0
+
+
+countForState : String -> Int
+countForState st =
+    let
+        maybeState = Dict.get st stateInfo
     in
-        case vote of
-            Rep ->
-                (u, t, r + count, d, i)
+        case maybeState of
+            Just state ->
+                if st == "DC" || congressionalDistrict st
+                then
+                    0
+                else
+                    1
+            Nothing ->
+                0
 
-            Dem ->
-                (u, t, r, d + count, i)
 
-            Ind ->
-                (u, t, r, d, i + count)
+addWinner : Int -> Vote -> (Int, Int, Int, Int, Int) -> (Int, Int, Int, Int, Int)
+addWinner count vote (u, t, r, d, i) =
+    case vote of
+        (_, NotAVote) ->
+            (u, t, r, d, i)
 
-            Undecided ->
-                (u + count, t, r, d, i)
+        (Rep, _) ->
+            (u, t, r + count, d, i)
 
-            TooClose ->
-                (u, t + count, r, d, i)
+        (Dem, _) ->
+            (u, t, r, d + count, i)
+
+        (Ind, _) ->
+            (u, t, r, d, i + count)
+
+        (TooClose, _) ->
+            (u, t + count, r, d, i)
+
+        _ ->
+            (u + count, t, r, d, i)
+
+
+addVotes : (String -> Int) -> String -> StateVote -> (Int, Int, Int, Int, Int) -> (Int, Int, Int, Int, Int)
+addVotes counter st (vote1, vote2) (u, t, r, d, i) =
+    let
+        count = counter st
+    in
+        addWinner count vote1 (u, t, r, d, i)
+            |> addWinner count vote2
 
 
 updateTotals : Model -> Model
 updateTotals model =
     let
-        (undecided, tooClose, rep, dem, ind) = Dict.foldl addElectors (0, 0, 0, 0, 0) model.votes.winners
+        adder =
+            case model.votes.contest of
+                Pres ->
+                    addVotes electorsForState
+                _ ->
+                    addVotes countForState
+        (undecided, tooClose, rep, dem, ind) = Dict.foldl adder (0, 0, 0, 0, 0) model.votes.winners
     in
         { model | undecided = undecided, tooClose = tooClose, rep = rep, dem = dem, ind = ind }
 
 
-cmp2012Vote : Model -> (String, Vote) -> (String, Vote)
-cmp2012Vote model (st, vote2012) =
+isActiveVote : Vote -> Bool
+isActiveVote (_, seat) =
+    case seat of
+        Up ->
+            True
+        _ ->
+            False
+
+
+cmp2012Vote : Model -> (String, StateVote) -> (String, StateVote)
+cmp2012Vote model (st, votes) =
     let
-        change = case (vote2012, (voteNow model st)) of
-            ( Rep, Rep ) ->
-                Undecided
-
-            ( Dem, Dem ) ->
-                Undecided
-
-            ( Rep, Dem ) ->
-                Dem
-
-            ( Dem, Rep ) ->
-                Rep
-
-            _ ->
+        v2012 = fst votes
+        vNow  = fst <| getStateVote model st
+        change =
+            if isActiveVote vNow
+            then
+                case (fst v2012, fst vNow) of
+                ( Rep , Rep ) ->
+                    Undecided
+                ( Dem, Dem ) ->
+                    Undecided
+                ( Rep, Dem ) ->
+                    Dem
+                ( Dem, Rep ) ->
+                    Rep
+                _ ->
+                    Undecided
+            else
                 Undecided
     in
-        (st, change)
+        (st, ( (change, Up), noVote ) )
 
 
 pushVotes : Model -> Votes -> (Model, Cmd Msg)
@@ -315,14 +488,13 @@ pushVotes model newVotes =
         ( newModel, Cmd.none )
 
 
-validState : String -> Bool
-validState st =
-    Dict.member st votes2012
-
-
-addStateToQuery : (String, Vote) -> Url -> Url
-addStateToQuery (st, vote) url =
-    addQuery st (voteToString vote) url
+addStateToQuery : (String, StateVote) -> Url -> Url
+addStateToQuery (st, (vote1, vote2)) url =
+    case vote1 of
+        (party, Up) ->
+            addQuery st (partyToString party) url
+        _ ->
+            url
 
 
 makeQuery : Model -> Url -> Url
@@ -332,13 +504,50 @@ makeQuery model url =
         (Dict.toList model.votes.winners)
 
 
+validState : String -> Bool
+validState st =
+    Dict.member st stateInfo
+
+
+validStateForContest : Contest -> String -> Bool
+validStateForContest contest st =
+    case Dict.get st stateInfo of
+        Just state ->
+            case contest of
+                Pres ->
+                    True
+                Gov ->
+                    state.govElection
+                Sen ->
+                    state.sen3Party /= Nothing
+        Nothing ->
+            False
+
+
+updateVote : (Dict String String) -> String -> StateVote -> StateVote
+updateVote query st (vote1, vote2) =
+    case vote1 of
+        (_, Up) ->
+            let
+                maybeParty = partyFromString <| Dict.get st query
+            in
+                case maybeParty of
+                    Nothing ->
+                        ( vote1, vote2 )
+                    Just party ->
+                        ( (party, Up), vote2 )
+        _ ->
+            ( vote1, vote2 )
+
+
 loadFromQuery : Maybe String -> Dict String String -> Model -> Votes
-loadFromQuery maybeContest query model =
+loadFromQuery maybeContest rawQuery model =
     let
-        queryVotes = Dict.map (\_ v -> voteFromString v) query
+        contest = contestFromString <| Maybe.withDefault "Pres" maybeContest
+        query = Dict.filter (\st _ -> validStateForContest contest st) rawQuery
     in
-        { contest = contestFromString <| Maybe.withDefault "Pres" maybeContest
-        , winners = Dict.union queryVotes model.votes.winners
+        { contest = contest
+        , winners = Dict.map (updateVote query) model.votes.winners
         }
 
 
@@ -354,13 +563,16 @@ update msg model =
         SetContest contest ->
             if contest /= model.votes.contest
             then
-                pushVotes model { contest = contest, winners = model.votes.winners }
+                pushVotes model
+                    { contest = contest
+                    , winners = initialVotes contest False
+                    }
             else
                 ( model, Cmd.none )
 
         ToggleVote st ->
             let
-                newWinners = Dict.update st toggleVote model.votes.winners
+                newWinners = Dict.update st (toggleVote model) model.votes.winners
             in
                 pushVotes model
                     { contest = model.votes.contest
@@ -368,13 +580,10 @@ update msg model =
                     }
 
         Load2012 ->
-            let
-                newWinners = votes2012
-            in
-                pushVotes model
-                    { contest = Pres
-                    , winners = newWinners
-                    }
+            pushVotes model
+                { contest = Pres
+                , winners = initialVotes Pres True
+                }
 
         Compare2012 ->
             let
@@ -383,7 +592,20 @@ update msg model =
                 pushVotes model
                     { contest = Pres
                     , winners = newWinners
+
                     }
+
+        LoadSenIncumbents ->
+            pushVotes model
+                { contest = Sen
+                , winners = initialVotes Sen True
+                }
+
+        LoadGovIncumbents ->
+            pushVotes model
+                { contest = Gov
+                , winners = initialVotes Gov True
+                }
 
         LoadFromQuery maybeContest query ->
             let
@@ -392,10 +614,10 @@ update msg model =
                 pushVotes model newVotes
 
         Reset ->
-            let
-                newVotes = initialVotes
-            in
-                pushVotes model newVotes
+            pushVotes model
+                { contest = model.votes.contest
+                , winners = initialVotes model.votes.contest False
+                }
 
         Undo ->
             let

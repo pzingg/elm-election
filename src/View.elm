@@ -19,7 +19,19 @@ import Svg.Attributes exposing
     )
 import Svg.Events exposing (..)
 
-import App exposing (Model, State, Msg(..), Vote(..), Contest(..), vote2012)
+import App exposing
+    ( Model
+    , State
+    , Msg(..)
+    , Party(..)
+    , Seat(..)
+    , Vote
+    , Contest(..)
+    , vote2012
+    , congressionalDistrict
+    , hasGovernorElection
+    , hasSenateElection
+    )
 
 
 senateInfo : String -> State -> String
@@ -52,14 +64,18 @@ stateText model =
         Just state ->
             let
                 n = state.electors
-                prefix = state.name ++ ": " ++ (toString n)
+                prefix = state.name ++ ": "
                 votes =
-                    if n == 1
-                    then
-                        " vote"
-                    else
-                        " votes"
-                suffix = ", voted " ++ (toString (vote2012 state.abbr)) ++ " in 2012."
+                    case model.votes.contest of
+                        Pres ->
+                            if n == 1
+                            then
+                                "1 vote, "
+                            else
+                                (toString n) ++ " votes, "
+                        _ ->
+                            ""
+                suffix = "voted " ++ (toString (vote2012 state.abbr)) ++ " in 2012."
                 govInfo =
                     if state.govElection
                     then
@@ -87,8 +103,8 @@ stateText model =
             "Mouse over a state to see info. Click a state to change vote."
 
 
-voteText : Model -> Vote -> String
-voteText model vote =
+voteText : Model -> Party -> String
+voteText model party =
     let
         (rep, dem) =
             case model.votes.contest of
@@ -97,7 +113,7 @@ voteText model vote =
                 _ ->
                     ( "Republicans", "Democrats" )
     in
-        case vote of
+        case party of
             Undecided ->
                 "Undecided: " ++ (toString model.undecided)
 
@@ -111,7 +127,7 @@ voteText model vote =
                 dem ++ ": " ++ (toString model.dem)
 
             Ind ->
-                "Independents: " ++ (toString model.dem)
+                "Independents: " ++ (toString model.ind)
 
 
 viewCounts : Model -> List (Html Msg)
@@ -150,6 +166,7 @@ viewCounts model =
     in
         repdem ++ ind ++ others
 
+
 viewButtons : Model -> List (Html Msg)
 viewButtons model =
     let
@@ -157,12 +174,18 @@ viewButtons model =
             case model.votes.contest of
                 Pres ->
                     [ button [ onClick Load2012 ]
-                        [ Html.text "Load 2012" ]
+                        [ Html.text "Show 2012" ]
                     , button [ onClick Compare2012 ]
                         [ Html.text "Compare 2012" ]
                     ]
-                _ ->
-                    []
+                Sen ->
+                    [ button [ onClick LoadSenIncumbents ]
+                        [ Html.text "Show Incumbents" ]
+                    ]
+                Gov ->
+                    [ button [ onClick LoadGovIncumbents ]
+                        [ Html.text "Show Incumbents" ]
+                    ]
         stdButtons =
             [ button [ disabled (cantUndo model), onClick Undo ]
                 [ Html.text "Undo" ]
@@ -181,11 +204,6 @@ viewButtons model =
         contestButtons ++ stdButtons
 
 
-congressionalDistrict : String -> Bool
-congressionalDistrict st =
-    String.contains "-" st
-
-
 cantUndo : Model -> Bool
 cantUndo model =
     List.isEmpty model.history
@@ -202,42 +220,80 @@ voteColor model st =
         maybeVote = Dict.get st model.votes.winners
     in
         case maybeVote of
-            Just vote ->
-                case vote of
-                    Undecided ->
-                        if congressionalDistrict st
-                        then
-                            "#ffffaa"
-                        else
-                            "#cccccc"
-
-                    TooClose ->
-                        "#9975b9"
-
-                    Dem ->
-                        "#0000ff"
-
-                    Rep ->
-                        "#ff0000"
-
-                    Ind ->
-                        "#00ff00"
-
+            Just (vote1, vote2) ->
+                if (snd vote1) /= Up && (snd vote2) /= NotAVote && (fst vote1) /= (fst vote2)
+                then
+                    "#e0e0e0"
+                else
+                    case vote1 of
+                        (TooClose, Up) ->
+                            "#9975b9"
+                        (Dem, Up) ->
+                            "#0000ff"
+                        (Rep, Up) ->
+                            "#ff0000"
+                        (Ind, Up) ->
+                            "#00ff00"
+                        (Dem, NotUp) ->
+                            "#e0e0ff"
+                        (Rep, NotUp) ->
+                            "#ffe0e0"
+                        (Ind, NotUp) ->
+                            "#e0ffe0"
+                        _ ->
+                            if congressionalDistrict st
+                            then
+                                "#ffffaa"
+                            else
+                                "#cccccc"
             Nothing ->
                 "#333333"
 
 
 stateAttributes : Model -> String -> List (Svg.Attribute Msg)
 stateAttributes model st =
-    [ id st
-    , onMouseOver (Hover st)
-    , onMouseOut MouseOut
-    , onClick (ToggleVote st)
-    , fill (voteColor model st)
-    , strokeWidth "2"
-    , stroke "#ffffff"
-    ]
+    let
+        canClick =
+            case model.votes.contest of
+                Pres ->
+                    True
+                Gov ->
+                    hasGovernorElection st
+                Sen ->
+                    hasSenateElection st
+        handleClick =
+            if canClick
+            then
+                [ onClick (ToggleVote st) ]
+            else
+                []
+    in
+        [ id st
+        , onMouseOver (Hover st)
+        , onMouseOut MouseOut
+        , fill (voteColor model st)
+        , strokeWidth "2"
+        , stroke "#ffffff"
+        ] ++ handleClick
 
+
+viewCds : Model -> List (Html Msg)
+viewCds model =
+    case model.votes.contest of
+        Pres ->
+            [ rect ( [ height "15.484", width "15.484", y "10", x "735.484" ] ++ (stateAttributes model "ME-1") )
+                []
+            , rect ( [ height "15.484", width "15.484", y "10", x "750.968" ] ++ (stateAttributes model "ME-2") )
+                []
+            , rect ( [ height "15.484", width "15.484", y "164.8906", x "332.903" ] ++ (stateAttributes model "NE-1") )
+                []
+            , rect ( [ height "15.484", width "15.484", y "164.8906", x "348.387" ] ++ (stateAttributes model "NE-2") )
+                []
+            , rect ( [ height "15.484", width "15.484", y "164.8906", x "363.871" ] ++ (stateAttributes model "NE-3") )
+                []
+            ]
+        _ ->
+            []
 
 view : Model -> Html Msg
 view model =
@@ -245,27 +301,14 @@ view model =
         [ tr []
             [ td [ id "map" ]
                 [ svg [ viewBox "160 0 640 500", preserveAspectRatio "xMidYMin" ]
-                    [ path ( [ d "M286.452,381.613L301.935,381.613L301.935,397.097L317.419,397.097L317.419,412.581L332.903,412.581L332.903,428.065L317.419,428.065L317.419,412.582L301.935,412.581L301.935,397.098L286.452,397.097L286.452,381.614L270.968,381.613L270.968,366.129L286.452,366.129Z" ] ++ (stateAttributes model "HI") )
+                    ( [ path ( [ d "M286.452,381.613L301.935,381.613L301.935,397.097L317.419,397.097L317.419,412.581L332.903,412.581L332.903,428.065L317.419,428.065L317.419,412.582L301.935,412.581L301.935,397.098L286.452,397.097L286.452,381.614L270.968,381.613L270.968,366.129L286.452,366.129Z" ] ++ (stateAttributes model "HI") )
                         []
                     , path ( [ d "M487.742,102.903L472.258,102.903L456.774,102.903L456.774,87.419L472.258,87.419L487.742,87.419L487.742,102.903L503.226,102.903L518.71,102.903L518.71,118.387L534.194,118.387L549.677,118.387L549.677,133.871L549.677,149.355L549.677,164.839L534.194,164.839L518.71,164.839L503.226,164.839L487.742,164.839L487.742,149.355L487.742,133.871L487.742,118.387Z" ] ++ (stateAttributes model "MI") )
                         []
-
                     , path ( [ d "M750.968,10L766.452,10L766.452,25.484L766.452,40.968L750.968,40.968L735.484,40.968L735.484,25.484L735.484,10Z" ] ++ (stateAttributes model "ME") )
                         []
-                    , rect ( [ height "15.484", width "15.484", y "10", x "735.484" ] ++ (stateAttributes model "ME-1") )
-                        []
-                    , rect ( [ height "15.484", width "15.484", y "10", x "750.968" ] ++ (stateAttributes model "ME-2") )
-                        []
-
                     , path ( [ d "M379.355,180.323L379.355,195.806L363.871,195.806L348.387,195.806L348.387,180.323L332.903,180.323L332.903,164.839L348.387,164.839L363.871,164.839L379.355,164.839Z" ] ++ (stateAttributes model "NE") )
                         []
-                    , rect ( [ height "15.484", width "15.484", y "164.8906", x "332.903" ] ++ (stateAttributes model "NE-1") )
-                        []
-                    , rect ( [ height "15.484", width "15.484", y "164.8906", x "348.387" ] ++ (stateAttributes model "NE-2") )
-                        []
-                    , rect ( [ height "15.484", width "15.484", y "164.8906", x "363.871" ] ++ (stateAttributes model "NE-3") )
-                        []
-
                     , path ( [ d "M627.097,164.839L642.581,164.839L658.065,164.839L673.548,164.839L689.032,164.839L689.032,180.323L689.032,195.806L689.032,211.29L673.548,211.29L658.065,211.29L642.581,211.29L627.097,211.29L611.613,211.29L596.129,211.29L596.129,195.806L580.645,195.806L580.645,180.323L580.645,164.839L596.129,164.839L611.613,164.839Z" ] ++ (stateAttributes model "PA") )
                         []
                     , path ( [ d "M735.484,40.968L750.968,40.968L766.452,40.968L766.452,56.452L766.452,71.935L750.968,71.935L735.484,71.935L735.484,56.452Z" ] ++ (stateAttributes model "NH") )
@@ -360,9 +403,10 @@ view model =
                         []
                     , path ( [ d "M209.032,397.097L209.032,381.613L224.516,381.613L224.516,397.097L224.516,412.581L240,412.581L240,428.065L224.516,428.065L224.516,412.581L209.032,412.581Z" ] ++ (stateAttributes model "AK") )
                         []
-                    , text' [ id "credit", dy "-0.5em", x "170", y "500" ]
+                    ] ++ (viewCds model) ++
+                    [ text' [ id "credit", dy "-0.5em", x "170", y "500" ]
                         [ Svg.text "Pictogram from the Wall Street Journal" ]
-                    ]
+                    ] )
                 ]
             , td [ id "legend" ]
                 ( (viewCounts model) ++ (viewButtons model) ++
