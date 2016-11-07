@@ -19,7 +19,31 @@ import Svg.Attributes exposing
     )
 import Svg.Events exposing (..)
 
-import App exposing (Model, Msg(..), Vote(..), Contest(..), vote2012)
+import App exposing (Model, State, Msg(..), Vote(..), Contest(..), vote2012)
+
+
+senateInfo : String -> State -> String
+senateInfo prefix state =
+    let
+        sen1 =
+            case state.sen1Party of
+                Just party ->
+                    [ state.sen1Name ++ " (" ++ (toString party) ++ ")" ]
+                Nothing ->
+                    []
+        sen2 =
+            case state.sen2Party of
+                Just party ->
+                    [ state.sen2Name ++ " (" ++ (toString party) ++ ")" ]
+                Nothing ->
+                    []
+        sens = sen1 ++ sen2
+    in
+        if List.isEmpty sens
+        then
+            ""
+        else
+            prefix ++ (String.join " and " sens) ++ "."
 
 
 stateText : Model -> String
@@ -36,8 +60,28 @@ stateText model =
                     else
                         " votes"
                 suffix = ", voted " ++ (toString (vote2012 state.abbr)) ++ " in 2012."
+                govInfo =
+                    if state.govElection
+                    then
+                        " Governor seat up, incumbent is "
+                    else
+                        " Governor: "
+                governor =
+                    case state.govParty of
+                        Just party ->
+                            govInfo ++ state.govName ++ " (" ++ (toString party) ++ ")."
+                        Nothing ->
+                            ""
+                senators =
+                    case state.sen3Party of
+                        Just party ->
+                            " Senate seat up, incumbent is " ++
+                                state.sen3Name ++ " (" ++ (toString party) ++ "), " ++
+                                senateInfo "other senator is " state
+                        Nothing ->
+                            senateInfo " Senators are " state
             in
-                prefix ++ votes ++ suffix
+                prefix ++ votes ++ suffix ++ governor ++ senators
 
         Nothing ->
             "Mouse over a state to see info. Click a state to change vote."
