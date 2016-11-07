@@ -304,6 +304,20 @@ initialVotes contest incumbents =
             initialGovernors incumbents
 
 
+savedVotes : Model -> Contest -> Dict String StateVote
+savedVotes model contest =
+    let
+        savedVotes =
+            List.filter (\votes -> votes.contest == contest) model.history
+                |> List.head
+    in
+        case savedVotes of
+            Nothing ->
+                initialVotes contest False
+            Just votes ->
+                votes.winners
+
+
 getStateVote : Model -> String -> StateVote
 getStateVote model st = getWithDefault (noVote, noVote) st model.votes.winners
 
@@ -565,7 +579,7 @@ update msg model =
             then
                 pushVotes model
                     { contest = contest
-                    , winners = initialVotes contest False
+                    , winners = savedVotes model contest
                     }
             else
                 ( model, Cmd.none )
